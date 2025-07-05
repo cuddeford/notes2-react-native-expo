@@ -1,111 +1,198 @@
-import { useState } from 'react'
-import { Dimensions, StyleProp, Text, TextInput, TextStyle, View } from "react-native"
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useEffect, useRef, useState } from 'react'
+import { Button, NativeSyntheticEvent, ScrollView, StyleProp, Text, TextInput, TextInputChangeEventData, TextInputKeyPressEventData, TextStyle, View } from "react-native"
 
 // ------------------------------------------------------------------------------Paragraph
-class Paragraph {
-	constructor(text: string) {
-		this.text = text
-	}
-
-	id: string = Math.random().toString(36).substring(7)
+interface IParagraph {
+	id: string
 	text: string
-	style: StyleProp<TextStyle> = {}
+	style?: StyleProp<TextStyle>
+	isFocused?: boolean
 }
-
-// ------------------------------------------------------------------------------RichTextEditor
-class RichTextContext {
-	constructor(paragraphs: Paragraph[] = [], setParagraphs: React.Dispatch<React.SetStateAction<Paragraph[]>>) {
-		this.paragraphs = paragraphs
-		this.setParagraphs = setParagraphs
-	}
-
-	paragraphs: Paragraph[]
-	setParagraphs: React.Dispatch<React.SetStateAction<Paragraph[]>>
-
-	addParagraph(text: string) {
-		this.paragraphs.push(new Paragraph(text))
-	}
-
-	removeParagraph(id: string) {
-		this.paragraphs = this.paragraphs.filter(p => p.id !== id)
-	}
-
-	getContentAsText() {
-		const blocks = this.paragraphs.map((p, index) => (
-			<Text
-				key={p.id}
-				style={p.style}
-			>
-				{p.text}
-			</Text>
-		))
-
-		return (
-			<VStack space={4} alignItems={"center"}>
-				{blocks}
-			</VStack>
-		)
-	}
+type ParagraphProps = IParagraph & {
+	index: number
+	paragraphs: IParagraph[]
+	setParagraphs: (paragraphs: IParagraph[]) => void
 }
+const Paragraph = (props: ParagraphProps) => {
+	const { id, text, style, index, paragraphs, setParagraphs, isFocused } = props
 
-const useRichTextEditor = () => {
-	const initialParagraphs: Paragraph[] = [
-		new Paragraph("This is the first paragraph."),
-		new Paragraph("This is the second paragraph."),
-		new Paragraph("This is the third paragraph."),
-	]
-	const [paragraphs, setParagraphs] = useState<Paragraph[]>(initialParagraphs)
-	const [editor] = useState(new RichTextContext(paragraphs, setParagraphs))
+	const ref = useRef<TextInput>(null)
 
-	return {
-		editor,
+	const handleChangeText = async (e: NativeSyntheticEvent<TextInputChangeEventData>) => {
+		let newText = e.nativeEvent.text.replace(/\n/g, '') // Strip newlines
+		// Update current paragraph's text
+		let updatedParagraphs = paragraphs.map(p => p.id === id ? { ...p, text: newText } : p)
+		setParagraphs(updatedParagraphs)
 	}
-}
 
-const Editor = () => {
-	const { editor } = useRichTextEditor()
+	const handleKeyPress = (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+		// Handle backspace to remove empty paragraphs and move the cursor to the previous paragraph
+		if (e.nativeEvent.key === 'Backspace') {
+			// Prevent default behavior of adding a newline
+			e.preventDefault()
+			if (text.trim() === '' && (index > 0 || paragraphs.length > 1)) {
+				if (index === 0) {
+					paragraphs[1].isFocused = true // Focus the next paragraph
+				} else {
+					paragraphs[index - 1].isFocused = true // Focus the previous paragraph
+				}
+
+				const updatedParagraphs = paragraphs
+					.filter((_, i) => i !== index)
+
+				setParagraphs(updatedParagraphs)
+			}
+		} else if (e.nativeEvent.key === 'Enter') {
+            // Prevent default behavior of adding a newline
+            e.preventDefault()
+
+            // Strip any lingering newlines from the current text and update state
+            const updatedParagraphsForEnter = paragraphs.map(p => p.id === id ? { ...p, text } : p)
+            setParagraphs(updatedParagraphsForEnter)
+
+            const newParagraph: IParagraph = {
+                id: `${Date.now()}`,
+                text: '',
+                style: style || {},
+                isFocused: false,
+            }
+
+			const updatedParagraphs = paragraphs.map(p => ({ ...p, isFocused: false })) // Unfocus all paragraphs
+			const newParagraphs = [
+				...updatedParagraphs.slice(0, index + 1),
+				newParagraph,
+				...updatedParagraphs.slice(index + 1),
+			]
+			setParagraphs(newParagraphs)
+		}
+	}
+
+	useEffect(() => {
+		// Focus the TextInput when the component mounts or when isFocused changes
+		if (isFocused && ref.current) {
+			setTimeout(() => {
+				ref?.current?.focus()
+			}, 0)
+		}
+	}, [isFocused, ref.current])
 
 	return (
-		<View style={{ flex: 1 }}>
-			{editor.getContentAsText()}
-		</View>
+		<TextInput
+			ref={ref}
+			style={{
+				backgroundColor: 'rgba(255, 0, 0, 0.25)',
+				borderRadius: '6%',
+				width: "100%",
+				padding: 16,
+				margin: 8,
+			}}
+			onChange={handleChangeText}
+			onKeyPress={handleKeyPress}
+			placeholder=""
+			multiline
+			scrollEnabled={false}
+
+			// selection={selection}
+			// onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
+		>
+			<Text style={[style, { fontWeight: 'bold', fontSize: 25 }]}>
+				{text}
+			</Text>
+		</TextInput>
 	)
 }
 
 // ------------------------------------------------------------------------------Notes2
 export default function Notes2() {
-	const [selection, setSelection] = useState({
-		start: 0,
-		end: 0,
-	})
+	const [paragraphs, setParagraphs] = useState<IParagraph[]>([])
 
-	const { editor } = useRichTextEditor()
+	useEffect(() => {
+		const loadParagraphs = async () => {
+			try {
+				const keys = await AsyncStorage.getAllKeys()
+				const paragraphKeys = keys.filter(key => key.startsWith('paragraph-')).sort((a, b) => {
+					const first = parseInt(a.split('-')[1])
+					const second = parseInt(b.split('-')[1])
+					return first - second
+				})
+				const values = await Promise.all(paragraphKeys.map(key => AsyncStorage.getItem(key)))
+				const loadedParagraphs = values
+					.map(value => value ? JSON.parse(value) : null)
+					.filter(Boolean)
+					.map(obj => ({
+						id: obj.id as string,
+						text: obj.text as string,
+						style: obj.style as StyleProp<TextStyle>,
+					}))
+
+				if (loadedParagraphs.length === 0) {
+					// If no paragraphs are loaded, create an initial paragraph
+					const initialParagraph: IParagraph = {
+						id: `${Date.now()}`,
+						text: '',
+						style: {},
+						isFocused: true,
+					}
+					setParagraphs([initialParagraph])
+				} else {
+					setParagraphs(loadedParagraphs)
+				}
+			} catch (error) {
+				console.error("Error loading paragraphs from AsyncStorage:", error)
+			}
+		}
+		loadParagraphs()
+	}, [])
+
+	useEffect(() => {
+		const saveParagraphs = async () => {
+			try {
+				await AsyncStorage.clear()
+				await AsyncStorage.multiSet(paragraphs.map(p => [`paragraph-${p.id}`, JSON.stringify(p)]))
+			} catch (error) {
+				console.error("Error saving paragraphs to AsyncStorage:", error)
+			}
+		}
+		saveParagraphs()
+	}, [paragraphs])
+
+	console.log(paragraphs)
 
 	return (
-		<View
+		<ScrollView
 			style={{
 				flex: 1,
+			}}
+			contentContainerStyle={{}}
+		>
+			<View style={{
+				padding: 16,
 				justifyContent: "center",
 				alignItems: "center",
-			}}
-		>
-			<TextInput
-				style={{
-					height: Dimensions.get("window").height - 100,
-					borderColor: "red",
-					borderWidth: 2,
-					width: "100%",
-					paddingHorizontal: 10,
-				}}
-				onChange={(e) => console.log(e.nativeEvent.text)}
-				placeholder=""
-				multiline
-				scrollEnabled
-				selection={selection}
-				onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-			>
-				{editor.getContentAsText()}
-			</TextInput>
-		</View>
+			}}>
+				{paragraphs.map((paragraph, index) => (
+					<Paragraph
+						key={paragraph.id}
+						index={index}
+						id={paragraph.id}
+						text={paragraph.text}
+						style={paragraph.style}
+						paragraphs={paragraphs}
+						setParagraphs={setParagraphs}
+						isFocused={paragraph.isFocused}
+					/>
+				))}
+
+				<Button title="Clear all paragraphs" onPress={() => {
+					setParagraphs([{
+						id: `${Date.now()}`,
+						text: '',
+						style: {},
+						isFocused: true,
+					}])
+				}} />
+			</View>
+		</ScrollView>
 	)
 }
