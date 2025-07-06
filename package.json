@@ -1,5 +1,5 @@
 {
-	"name": "notes2-rn",
+	"name": "notes2-react-native-expo",
 	"main": "expo-router/entry",
 	"version": "1.0.0",
 	"scripts": {
