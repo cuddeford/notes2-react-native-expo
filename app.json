@@ -1,7 +1,7 @@
 {
 	"expo": {
-		"name": "notes2-rn",
-		"slug": "notes2-rn",
+		"name": "notes2-react-native-expo",
+		"slug": "notes2-react-native-expo",
 		"version": "1.0.0",
 		"orientation": "portrait",
 		"icon": "./assets/images/icon.png",
